@@ -1,0 +1,23 @@
+# 複製為 config.yaml 並 chmod 600；此範例不應存放真實金鑰。
+line:
+  # LINE.js 機器人 API；遠端必須使用 wss://。
+  url: "ws://127.0.0.1:3789/api/ws"
+  # 在 LINE.js 專案目錄執行 npm run cli -- token 取得。
+  token: ""
+  # 要紀錄與摘要的聊天室，格式為「聊天室ID: 顯示名稱」；ID 須同時列在 LINE.js 的 api.chats。
+  chats:
+    c0123456789abcdef0123456789abcdef: "範例聊天室"
+
+claude:
+  apiKey: ""
+  # 摘要使用的模型；省略時為 claude-haiku-5-5。
+  model: "claude-haiku-5-5"
+  maxOutputTokens: 4096
+  timeoutMs: 120000
+
+web:
+  host: "127.0.0.1"
+  port: 6181
+
+# 紀錄時間、整點與「今天」依此時區判斷；省略時使用系統時區。
+timezone: "Asia/Taipei"
