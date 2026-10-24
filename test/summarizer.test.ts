@@ -32,7 +32,7 @@ test('a topic that runs past the hour boundary stays in the hour it started', as
       continued: [{ topicId: 1, messages: [0], points: ['討論週六去爬山', '決定早上七點集合'] }],
       topics: [{ title: '新顯示卡', points: ['有人買了新顯示卡'], messages: [1, 2] }],
     },
-  ], '2026-10-24 16:00:30');
+  ], '2026-10-24 17:00:30');
   add('2026-10-24 14:50:00', 'uA', '週六要不要去爬山');
   add('2026-10-24 14:58:00', 'uB', '好啊');
   add('2026-10-24 15:05:00', 'uA', '那七點集合');
@@ -44,7 +44,7 @@ test('a topic that runs past the hour boundary stays in the hour it started', as
 
   assert.equal(requests.length, 2);
   assert.equal(requests[0]!.model, 'claude-haiku-5-5');
-  // Batches never span hours, and the current hour is left alone.
+  // Batches never span hours, and hours that ended less than an hour ago are left alone.
   assert.deepEqual(requests[0]!.messages.map(message => message.time), ['14:50', '14:58']);
   assert.deepEqual(requests[1]!.messages.map(message => message.time), ['15:05', '15:20', '15:21']);
   assert.deepEqual(requests[1]!.activeTopics.map(topic => topic.id), [1]);
@@ -60,6 +60,27 @@ test('a topic that runs past the hour boundary stays in the hour it started', as
   assert.deepEqual(log.topicMessages(CHAT, topics[0]!.id).map(message => message.text), ['週六要不要去爬山', '好啊', '那七點集合']);
   assert.deepEqual(log.topicMessages(CHAT, topics[1]!.id).map(message => message.text), ['我買了新顯卡', '哪一張']);
   assert.deepEqual(log.pending(CHAT, '9999', 10).map(message => message.text), ['還在進行中的小時']);
+  // Every batch is recorded per chat and hour, with its time range and the messages it consumed.
+  assert.deepEqual(log.db.prepare(`SELECT chat_id AS chatId, hour, start_at AS startAt, end_at AS endAt,
+    message_count AS messageCount, model, summarized_at AS summarizedAt FROM summaries ORDER BY id`).all().map(row => ({ ...row })), [
+    { chatId: CHAT, hour: '2026-10-24 14', startAt: '2026-10-24 14:50:00', endAt: '2026-10-24 14:58:00',
+      messageCount: 2, model: 'claude-haiku-5-5', summarizedAt: '2026-10-24 17:00:30' },
+    { chatId: CHAT, hour: '2026-10-24 15', startAt: '2026-10-24 15:05:00', endAt: '2026-10-24 15:21:00',
+      messageCount: 3, model: 'claude-haiku-5-5', summarizedAt: '2026-10-24 17:00:30' },
+  ]);
+});
+
+test('an hour is summarized two hours after it started, not right after it ends', async () => {
+  const { log, summarizer, requests, add } = setup([
+    { continued: [], topics: [{ title: '早餐', points: ['吃什麼'], messages: [0] }] },
+  ], '2026-10-24 16:00:30');
+  add('2026-10-24 14:50:00', 'uA', '早餐吃什麼');
+  add('2026-10-24 15:50:00', 'uA', '剛結束的小時');
+
+  await summarizer.runOnce();
+
+  assert.deepEqual(requests.map(request => request.messages.map(message => message.text)), [['早餐吃什麼']]);
+  assert.deepEqual(log.pending(CHAT, '9999', 10).map(message => message.text), ['剛結束的小時']);
 });
 
 test('an invalid grouping leaves the hour pending and stops later hours', async () => {
@@ -83,7 +104,7 @@ test('a message cannot be assigned to two topics', async () => {
       { title: 'a', points: ['a'], messages: [0] },
       { title: 'b', points: ['b'], messages: [0] },
     ] },
-  ], '2026-10-24 15:00:30');
+  ], '2026-10-24 16:00:30');
   add('2026-10-24 14:50:00', 'uA', '一');
 
   await summarizer.runOnce();

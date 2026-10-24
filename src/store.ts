@@ -50,6 +50,20 @@ export interface TopicUpdate {
   messageIds: number[];
 }
 
+/** One summarization run of a chat: the messages of one hour (or one slice of a busy hour). */
+export interface SummaryBatch {
+  /** Row IDs of every message the run consumed, including small talk that joined no topic. */
+  messageIds: number[];
+  /** Hour the messages were sent in, `YYYY-MM-DD HH`. */
+  hour: string;
+  /** Time of the first and last message in the run. */
+  startAt: string;
+  endAt: string;
+  model: string;
+  /** When the run finished, in the configured timezone. */
+  summarizedAt: string;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS messages (
   sent_at    TEXT NOT NULL,
@@ -57,12 +71,24 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id  TEXT NOT NULL,
   text       TEXT NOT NULL,
   message_id TEXT NOT NULL,
-  summarized INTEGER NOT NULL DEFAULT 0,
+  summary_id INTEGER,
   topic_id   INTEGER,
   UNIQUE (chat_id, message_id)
 );
-CREATE INDEX IF NOT EXISTS messages_pending ON messages (chat_id, summarized, sent_at);
+CREATE INDEX IF NOT EXISTS messages_pending ON messages (chat_id, summary_id, sent_at);
 CREATE INDEX IF NOT EXISTS messages_by_topic ON messages (topic_id);
+CREATE INDEX IF NOT EXISTS messages_by_summary ON messages (summary_id);
+CREATE TABLE IF NOT EXISTS summaries (
+  id            INTEGER PRIMARY KEY,
+  chat_id       TEXT NOT NULL,
+  hour          TEXT NOT NULL,
+  start_at      TEXT NOT NULL,
+  end_at        TEXT NOT NULL,
+  message_count INTEGER NOT NULL,
+  model         TEXT NOT NULL,
+  summarized_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS summaries_by_hour ON summaries (chat_id, hour);
 CREATE TABLE IF NOT EXISTS topics (
   id       INTEGER PRIMARY KEY,
   chat_id  TEXT NOT NULL,
@@ -105,7 +131,8 @@ export class ChatLog {
   readonly #active: StatementSync;
   readonly #updateTopic: StatementSync;
   readonly #insertTopic: StatementSync;
-  readonly #markSummarized: StatementSync;
+  readonly #insertSummary: StatementSync;
+  readonly #linkSummary: StatementSync;
   readonly #assignTopic: StatementSync;
   readonly #days: StatementSync;
   readonly #topicsOn: StatementSync;
@@ -120,14 +147,16 @@ export class ChatLog {
     this.#edit = this.db.prepare('UPDATE messages SET text = ? WHERE chat_id = ? AND message_id = ?');
     this.#remove = this.db.prepare('DELETE FROM messages WHERE chat_id = ? AND message_id = ?');
     this.#pending = this.db.prepare(`SELECT rowid AS id, sent_at AS sentAt, sender_id AS senderId, text FROM messages
-      WHERE chat_id = ? AND summarized = 0 AND sent_at < ? ORDER BY sent_at, rowid LIMIT ?`);
+      WHERE chat_id = ? AND summary_id IS NULL AND sent_at < ? ORDER BY sent_at, rowid LIMIT ?`);
     this.#active = this.db.prepare(`SELECT ${TOPIC_COLUMNS} FROM topics
       WHERE chat_id = ? AND end_at >= ? ORDER BY end_at DESC, id DESC LIMIT ?`);
     this.#updateTopic = this.db.prepare(`UPDATE topics SET points = ?, end_at = max(end_at, ?)
       WHERE id = ? AND chat_id = ?`);
     this.#insertTopic = this.db.prepare(`INSERT INTO topics (chat_id, hour, title, points, start_at, end_at)
       VALUES (?, ?, ?, ?, ?, ?)`);
-    this.#markSummarized = this.db.prepare('UPDATE messages SET summarized = 1 WHERE rowid = ? AND chat_id = ?');
+    this.#insertSummary = this.db.prepare(`INSERT INTO summaries
+      (chat_id, hour, start_at, end_at, message_count, model, summarized_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    this.#linkSummary = this.db.prepare('UPDATE messages SET summary_id = ? WHERE rowid = ? AND chat_id = ?');
     this.#assignTopic = this.db.prepare('UPDATE messages SET topic_id = ? WHERE rowid = ? AND chat_id = ?');
     this.#days = this.db.prepare(`SELECT DISTINCT substr(hour, 1, 10) AS day FROM topics
       WHERE chat_id = ? ORDER BY day`);
@@ -159,8 +188,8 @@ export class ChatLog {
     return (this.#active.all(chatId, since, limit) as unknown as TopicRow[]).map(toTopic);
   }
 
-  /** Atomically store one summarized batch and mark its messages as done. */
-  applySummary(chatId: string, messageIds: number[], updates: TopicUpdate[], created: NewTopic[]): void {
+  /** Atomically store one summarization run: its record, the topic changes and the summarized messages. */
+  applySummary(chatId: string, batch: SummaryBatch, updates: TopicUpdate[], created: NewTopic[]): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       for (const update of updates) {
@@ -173,7 +202,9 @@ export class ChatLog {
           JSON.stringify(topic.points), topic.startAt, topic.endAt);
         for (const id of topic.messageIds) this.#assignTopic.run(lastInsertRowid, id, chatId);
       }
-      for (const id of messageIds) this.#markSummarized.run(id, chatId);
+      const { lastInsertRowid: summaryId } = this.#insertSummary.run(chatId, batch.hour, batch.startAt,
+        batch.endAt, batch.messageIds.length, batch.model, batch.summarizedAt);
+      for (const id of batch.messageIds) this.#linkSummary.run(summaryId, id, chatId);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');

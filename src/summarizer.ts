@@ -165,11 +165,14 @@ export class Summarizer {
     await this.#running;
   }
 
-  /** Summarize every completed hour that still has unsummarized messages. */
+  /**
+   * Summarize every hour that ended at least an hour ago (at 16:00 that is everything before 15:00), so a topic
+   * still running just past an hour boundary has had time to finish before its hour is written down.
+   */
   runOnce(): Promise<void> {
     // A slow catch-up must not overlap the next tick and summarize the same batch twice.
     this.#running ??= (async () => {
-      const cutoff = `${localDateTime(this.#now(), this.#timezone).slice(0, 13)}:00:00`;
+      const cutoff = shiftHours(`${localDateTime(this.#now(), this.#timezone).slice(0, 13)}:00:00`, -1);
       for (const chatId of this.#chats) {
         try {
           while (!this.#abort.signal.aborted && await this.summarizeNext(chatId, cutoff)) { /* next batch */ }
@@ -217,7 +220,11 @@ export class Summarizer {
     };
     const result = await this.#request(JSON.stringify(input));
     const { updates, created } = interpretSummary(result, batch, active);
-    this.#log.applySummary(chatId, batch.map(message => message.id), updates, created);
+    this.#log.applySummary(chatId, {
+      messageIds: batch.map(message => message.id), hour,
+      startAt: batch[0]!.sentAt, endAt: batch.at(-1)!.sentAt,
+      model: this.#claude.model, summarizedAt: localDateTime(this.#now(), this.#timezone),
+    }, updates, created);
     return true;
   }
 

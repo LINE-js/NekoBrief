@@ -16,11 +16,14 @@ test('serves summaries by chat and date, original messages per topic, and the pa
   add(CHAT, '2026-10-23 23:41:00', 'uBob', '在看動畫');
   add(CHAT, '2026-10-24 00:20:00', 'uAlice', '晚安');
   add(OTHER, '2026-10-24 08:00:00', 'uEve', '別的聊天室');
-  log.applySummary(CHAT, [], [], [
+  const run = (hour: string, messageIds: number[]) => ({
+    messageIds, hour, startAt: `${hour}:00:00`, endAt: `${hour}:59:59`, model: 'm', summarizedAt: '2026-10-24 12:00:00',
+  });
+  log.applySummary(CHAT, run('2026-10-23 23', [1, 2, 3]), [], [
     { title: '跨日話題', points: ['重點'], startAt: '2026-10-23 23:40:00', endAt: '2026-10-24 00:20:00', messageIds: [1, 2, 3] },
     { title: '早餐', points: ['吃什麼'], startAt: '2026-10-24 08:05:00', endAt: '2026-10-24 08:30:00', messageIds: [] },
   ]);
-  log.applySummary(OTHER, [], [], [
+  log.applySummary(OTHER, run('2026-10-24 08', [4]), [], [
     { title: '別處', points: ['x'], startAt: '2026-10-24 08:00:00', endAt: '2026-10-24 08:00:00', messageIds: [4] },
   ]);
   const server = createWebServer({
