@@ -7,6 +7,7 @@ const PUBLIC = new URL('../../public/', import.meta.url);
 const ASSETS: Record<string, { type: string; body: Buffer }> = {
   '/assets/app.js': { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL('app.js', PUBLIC)) },
   '/assets/style.css': { type: 'text/css; charset=utf-8', body: readFileSync(new URL('style.css', PUBLIC)) },
+  '/favicon.ico': { type: 'image/x-icon', body: readFileSync(new URL('favicon.ico', PUBLIC)) },
 };
 const INDEX = readFileSync(new URL('index.html', PUBLIC));
 /** Front-end routes: `/`, `/{chatId}`, `/{chatId}/{YYYYMMDD}`. */
@@ -16,7 +17,7 @@ const API = /^\/api\/chats\/([A-Za-z0-9]+)(?:\/days\/(\d{8})|\/topics\/([1-9]\d{
 const EXPORT = /^\/([A-Za-z0-9]+)\/(\d{8})\.json$/;
 const HEADERS = {
   'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
-    + "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    + "img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   // Chat IDs are part of every URL; keep them out of other sites' logs.
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
