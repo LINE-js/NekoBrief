@@ -1,0 +1,131 @@
+import { createServer, type Server, type ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
+import type { ChatLog, ChatMessage } from './store.js';
+import { localDateTime } from './time.js';
+
+const PUBLIC = new URL('../../public/', import.meta.url);
+const ASSETS: Record<string, { type: string; body: Buffer }> = {
+  '/assets/app.js': { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL('app.js', PUBLIC)) },
+  '/assets/style.css': { type: 'text/css; charset=utf-8', body: readFileSync(new URL('style.css', PUBLIC)) },
+};
+const INDEX = readFileSync(new URL('index.html', PUBLIC));
+/** Front-end routes: `/`, `/{chatId}`, `/{chatId}/{YYYYMMDD}`. */
+const PAGE = /^\/(?:[A-Za-z0-9]+(?:\/\d{8})?\/?)?$/;
+const API = /^\/api\/chats\/([A-Za-z0-9]+)(?:\/days\/(\d{8})|\/topics\/([1-9]\d{0,14}))?$/;
+/** `/{chatId}/{YYYYMMDD}.json`: the day's summary with original chats as a JSON file. */
+const EXPORT = /^\/([A-Za-z0-9]+)\/(\d{8})\.json$/;
+const HEADERS = {
+  'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+    + "base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  // Chat IDs are part of every URL; keep them out of other sites' logs.
+  'referrer-policy': 'no-referrer',
+  'x-content-type-options': 'nosniff',
+};
+
+function reply(response: ServerResponse, status: number, type: string, body: Buffer | string, head: boolean,
+  cache = 'no-cache'): void {
+  response.writeHead(status, {
+    ...HEADERS, 'content-type': type, 'cache-control': cache,
+    // JSON is public data: any site may read it, not only pages served from this origin.
+    ...(type.startsWith('application/json') ? { 'access-control-allow-origin': '*' } : {}),
+  });
+  response.end(head ? undefined : body);
+}
+
+function json(response: ServerResponse, status: number, value: unknown, head: boolean): void {
+  reply(response, status, 'application/json; charset=utf-8', JSON.stringify(value), head, 'no-store');
+}
+
+/** Whether `YYYYMMDD` names a real calendar date. */
+function validDate(compact: string): boolean {
+  const iso = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+  const parsed = Date.parse(`${iso}T00:00:00Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().startsWith(iso);
+}
+
+/** Sender IDs never leave the server: speakers become ordinals in order of appearance. */
+function anonymousMessages(messages: ChatMessage[]): { time: string; speaker: number; text: string }[] {
+  const speakers = new Map<string, number>();
+  return messages.map(message => {
+    let speaker = speakers.get(message.senderId);
+    if (speaker === undefined) {
+      speaker = speakers.size;
+      speakers.set(message.senderId, speaker);
+    }
+    return { time: message.sentAt.slice(0, 16), speaker, text: message.text };
+  });
+}
+
+export function createWebServer({ chats, log, timezone, now = Date.now }: {
+  /** Chat ID → display name. */
+  chats: Map<string, string>; log: ChatLog; timezone: string; now?: () => number;
+}): Server {
+  return createServer((request, response) => {
+    const head = request.method === 'HEAD';
+    if (request.method !== 'GET' && !head) {
+      response.setHeader('allow', 'GET, HEAD');
+      json(response, 405, { error: 'method_not_allowed' }, head);
+      return;
+    }
+    let path: string;
+    try {
+      path = new URL(request.url ?? '/', 'http://localhost').pathname;
+    } catch {
+      json(response, 400, { error: 'bad_request' }, head);
+      return;
+    }
+    const asset = ASSETS[path];
+    if (asset) {
+      reply(response, 200, asset.type, asset.body, head);
+      return;
+    }
+    const exported = EXPORT.exec(path);
+    const api = exported ? undefined : API.exec(path);
+    if (exported || api) {
+      const [, chatId = '', compact, topicId] = exported ?? api!;
+      const name = chats.get(chatId);
+      // Only configured chats are served; others are indistinguishable from nonexistent IDs.
+      if (name === undefined) {
+        json(response, 404, { error: 'unknown_chat' }, head);
+        return;
+      }
+      if (topicId !== undefined) {
+        json(response, 200, { messages: anonymousMessages(log.topicMessages(chatId, Number(topicId))) }, head);
+        return;
+      }
+      if (compact === undefined) {
+        json(response, 200, {
+          name, today: localDateTime(now(), timezone).slice(0, 10), days: log.days(chatId),
+        }, head);
+        return;
+      }
+      if (!validDate(compact)) {
+        json(response, 404, { error: 'invalid_date' }, head);
+        return;
+      }
+      const date = `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+      const topics = log.topicsOn(chatId, date).map(topic => ({
+        id: topic.id, hour: topic.hour.slice(11, 13), title: topic.title, points: topic.points,
+        start: topic.startAt.slice(0, 16), end: topic.endAt.slice(0, 16), messageCount: topic.messageCount,
+      }));
+      if (exported) {
+        // The whole day with original chats, pretty-printed as a file.
+        response.setHeader('content-disposition', `inline; filename="${chatId}-${compact}.json"`);
+        reply(response, 200, 'application/json; charset=utf-8', `${JSON.stringify({
+          chat: name, date,
+          topics: topics.map(({ id, messageCount: _count, ...topic }) => ({
+            ...topic, messages: anonymousMessages(log.topicMessages(chatId, id)),
+          })),
+        }, null, 2)}\n`, head, 'no-store');
+        return;
+      }
+      json(response, 200, { date, topics }, head);
+      return;
+    }
+    if (PAGE.test(path)) {
+      reply(response, 200, 'text/html; charset=utf-8', INDEX, head);
+      return;
+    }
+    json(response, 404, { error: 'not_found' }, head);
+  });
+}
