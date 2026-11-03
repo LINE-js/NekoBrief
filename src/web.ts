@@ -9,9 +9,27 @@ const ASSETS: Record<string, { type: string; body: Buffer }> = {
   '/assets/style.css': { type: 'text/css; charset=utf-8', body: readFileSync(new URL('style.css', PUBLIC)) },
   '/favicon.ico': { type: 'image/x-icon', body: readFileSync(new URL('favicon.ico', PUBLIC)) },
 };
-const INDEX = readFileSync(new URL('index.html', PUBLIC));
+const INDEX = readFileSync(new URL('index.html', PUBLIC), 'utf8');
+const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ESCAPES[char]!);
+const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:]+\](?::\d{1,5})?$/;
+
+/** Link previews are built by crawlers that do not run the page's script, so the tags are written by the server. */
+function metaTags(title: string, description: string, url: string | undefined): string {
+  const tags = [
+    ['og:type', 'website'], ['og:site_name', 'NekoBrief'], ['og:locale', 'zh_TW'],
+    ['og:title', title], ['og:description', description],
+  ];
+  if (url) tags.push(['og:url', url]);
+  return [
+    `<meta name="description" content="${escapeHtml(description)}">`,
+    ...tags.map(([property, content]) => `<meta property="${property}" content="${escapeHtml(content!)}">`),
+    '<meta name="twitter:card" content="summary">',
+  ].join('\n  ');
+}
+
 /** Front-end routes: `/`, `/{chatId}`, `/{chatId}/{YYYYMMDD}`. */
-const PAGE = /^\/(?:[A-Za-z0-9]+(?:\/\d{8})?\/?)?$/;
+const PAGE = /^\/(?:([A-Za-z0-9]+)(?:\/(\d{8}))?\/?)?$/;
 const API = /^\/api\/chats\/([A-Za-z0-9]+)(?:\/days\/(\d{8})|\/topics\/([1-9]\d{0,14}))?$/;
 /** `/{chatId}/{YYYYMMDD}.json`: the day's summary with original chats as a JSON file. */
 const EXPORT = /^\/([A-Za-z0-9]+)\/(\d{8})\.json$/;
@@ -131,8 +149,27 @@ export function createWebServer({ chats, log, timezone, now = Date.now }: {
       json(response, 200, { date, topics }, head);
       return;
     }
-    if (PAGE.test(path)) {
-      reply(response, 200, 'text/html; charset=utf-8', INDEX, head);
+    const page = PAGE.exec(path);
+    if (page) {
+      const [, chatId, compact] = page;
+      const host = request.headers.host;
+      const proto = request.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+      const origin = host && HOST.test(host) ? `${proto}://${host}` : undefined;
+      let title = 'NekoBrief';
+      let description = '聊天室的每小時話題摘要。';
+      const name = chatId === undefined ? undefined : chats.get(chatId);
+      if (chatId !== undefined && name !== undefined) {
+        const date = compact !== undefined && validDate(compact)
+          ? `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
+          : localDateTime(now(), timezone).slice(0, 10);
+        const topics = log.topicsOn(chatId, date);
+        title = `${name} · ${date} · NekoBrief`;
+        description = topics.length === 0
+          ? `${name} 在 ${date} 沒有摘要。`
+          : `${name} 在 ${date} 的 ${topics.length} 個話題：${topics.slice(0, 5).map(topic => topic.title).join('、')}${topics.length > 5 ? '…' : ''}`;
+      }
+      const meta = metaTags(title, description, origin && `${origin}${path}`);
+      reply(response, 200, 'text/html; charset=utf-8', INDEX.replace('<!--meta-->', () => meta), head);
       return;
     }
     json(response, 404, { error: 'not_found' }, head);

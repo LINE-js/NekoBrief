@@ -85,4 +85,13 @@ test('serves summaries by chat and date, original messages per topic, and the pa
     assert.match(await response.text(), /\/assets\/app\.js/);
   }
   assert.equal((await get(`/${CHAT}/2026-10-24`)).status, 404);
+
+  // Link previews come from the server; unconfigured chats get the generic tags and none of their content.
+  const preview = await (await fetch(`${base}/${CHAT}/20261024`, { headers: { 'x-forwarded-proto': 'https' } })).text();
+  assert.match(preview, /<meta property="og:title" content="貓咪群 · 2026-10-24 · NekoBrief">/);
+  assert.match(preview, /<meta property="og:description" content="貓咪群 在 2026-10-24 的 1 個話題：早餐">/);
+  assert.match(preview, new RegExp(`<meta property="og:url" content="https://127\\.0\\.0\\.1:\\d+/${CHAT}/20261024">`));
+  const unknown = await (await get(`/${OTHER}/20261024`)).text();
+  assert.match(unknown, /<meta property="og:title" content="NekoBrief">/);
+  assert.ok(!unknown.includes('別處'));
 });
