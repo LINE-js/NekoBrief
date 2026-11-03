@@ -96,6 +96,8 @@ body {
 
 .home { color: inherit; text-decoration: none; }
 
+a.ext { color: var(--primary); text-underline-offset: 2px; overflow-wrap: anywhere; }
+
 #dates {
   display: flex;
   gap: 0.6rem;

@@ -29,6 +29,31 @@ function element(tag, className, text) {
   return node;
 }
 
+const URL_PATTERN = /https?:\/\/[^\s<>"'，。！？、；：（）「」『』【】]+/g;
+const URL_TRAILING = /[.,;:!?)\]}]+$/;
+
+/** Append `text` to `node`, turning http(s) URLs into links that open in a new tab. */
+function appendLinked(node, text) {
+  let last = 0;
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const url = match[0].replace(URL_TRAILING, '');
+    try {
+      new URL(url);
+    } catch {
+      continue;
+    }
+    if (match.index > last) node.append(text.slice(last, match.index));
+    const link = element('a', 'ext', url);
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    node.append(link);
+    last = match.index + url.length;
+  }
+  if (last < text.length) node.append(text.slice(last));
+  return node;
+}
+
 function notice(emoji, text) {
   const box = element('div', 'notice');
   box.append(element('div', 'notice-emoji', emoji), element('p', undefined, text));
@@ -90,7 +115,7 @@ function renderChat(container, messages, date) {
     const avatar = element('span', 'avatar', continued ? '' : speakerName(message.speaker));
     avatar.setAttribute('aria-label', `成員 ${speakerName(message.speaker)}`);
     const bubble = element('div', 'bubble');
-    bubble.append(element('span', 'text', message.text), element('time', 'stamp', timeLabel(message.time, date)));
+    bubble.append(appendLinked(element('span', 'text'), message.text), element('time', 'stamp', timeLabel(message.time, date)));
     row.append(avatar, bubble);
     rows.push(row);
   }
@@ -105,7 +130,7 @@ function renderTopic(topic, index, date) {
   time.dateTime = topic.start.replace(' ', 'T');
   header.append(element('h3', undefined, topic.title), time);
   const list = element('ul', 'points');
-  for (const point of topic.points) list.append(element('li', undefined, point));
+  for (const point of topic.points) list.append(appendLinked(element('li'), point));
   article.append(header, list);
 
   if (topic.messageCount > 0) {
