@@ -83,11 +83,8 @@ test('an hour is summarized two hours after it started, not right after it ends'
   assert.deepEqual(log.pending(CHAT, '9999', 10).map(message => message.text), ['剛結束的小時']);
 });
 
-test('an invalid grouping leaves the hour pending and stops later hours', async () => {
-  const { log, summarizer, requests, add } = setup([
-    // Index 5 does not exist in the batch.
-    { continued: [], topics: [{ title: 'x', points: ['y'], messages: [5] }] },
-  ], '2026-10-24 17:00:30');
+test('an unusable reply leaves the hour pending and stops later hours', async () => {
+  const { log, summarizer, requests, add } = setup([null], '2026-10-24 17:00:30');
   add('2026-10-24 14:50:00', 'uA', '一');
   add('2026-10-24 15:50:00', 'uA', '二');
 
@@ -98,17 +95,25 @@ test('an invalid grouping leaves the hour pending and stops later hours', async 
   assert.equal(log.pending(CHAT, '9999', 10).length, 2);
 });
 
-test('a message cannot be assigned to two topics', async () => {
+test('grouping mistakes drop the bad part instead of failing the hour', async () => {
   const { log, summarizer, add } = setup([
-    { continued: [], topics: [
-      { title: 'a', points: ['a'], messages: [0] },
-      { title: 'b', points: ['b'], messages: [0] },
+    { continued: [{ topicId: 99, points: ['不存在的主題'], messages: [2] }], topics: [
+      { title: 'a', points: ['a'], messages: [0, 7, 1.5] },
+      // Message 0 already belongs to topic a.
+      { title: 'b', points: ['b'], messages: [0, 1] },
+      { title: 'c', points: [' '], messages: [2] },
     ] },
   ], '2026-10-24 16:00:30');
   add('2026-10-24 14:50:00', 'uA', '一');
+  add('2026-10-24 14:51:00', 'uB', '二');
+  add('2026-10-24 14:52:00', 'uA', '三');
 
   await summarizer.runOnce();
 
-  assert.deepEqual(log.topicsOn(CHAT, '2026-10-24'), []);
-  assert.equal(log.pending(CHAT, '9999', 10).length, 1);
+  const topics = log.topicsOn(CHAT, '2026-10-24');
+  assert.deepEqual(topics.map(topic => [topic.title, log.topicMessages(CHAT, topic.id).map(message => message.text)]), [
+    ['a', ['一']],
+    ['b', ['二']],
+  ]);
+  assert.equal(log.pending(CHAT, '9999', 10).length, 0);
 });
