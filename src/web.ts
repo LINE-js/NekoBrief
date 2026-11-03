@@ -80,6 +80,14 @@ export function createWebServer({ chats, log, timezone, now = Date.now }: {
       reply(response, 200, asset.type, asset.body, head);
       return;
     }
+    if (path === '/api/chats') {
+      const today = localDateTime(now(), timezone).slice(0, 10);
+      json(response, 200, {
+        today,
+        chats: [...chats].map(([chatId, name]) => ({ chatId, name, todayTopics: log.topicsOn(chatId, today).length })),
+      }, head);
+      return;
+    }
     const exported = EXPORT.exec(path);
     const api = exported ? undefined : API.exec(path);
     if (exported || api) {

@@ -94,6 +94,8 @@ body {
 
 .paw { display: inline-block; transform: rotate(-12deg); }
 
+.home { color: inherit; text-decoration: none; }
+
 #dates {
   display: flex;
   gap: 0.6rem;
@@ -299,6 +301,21 @@ body {
   background: var(--accent);
   opacity: 0.8;
 }
+
+/* ---------- Home chat list ---------- */
+
+.chat-list { margin-top: 1.25rem; }
+
+/* The card's rise animation holds `transform`, so hover highlights the border instead. */
+.chat-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+
+.chat-link:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.chat-link:hover h3 { color: var(--accent); }
 
 /* ---------- Original chat ---------- */
 

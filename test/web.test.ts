@@ -35,6 +35,9 @@ test('serves summaries by chat and date, original messages per topic, and the pa
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const get = (path: string) => fetch(base + path);
 
+  // The home page lists every configured chat with today's topic count, in config order.
+  assert.deepEqual(await (await get('/api/chats')).json(),
+    { today: '2026-10-24', chats: [{ chatId: CHAT, name: '貓咪群', todayTopics: 1 }] });
   assert.deepEqual(await (await get(`/api/chats/${CHAT}`)).json(),
     { name: '貓咪群', today: '2026-10-24', days: ['2026-10-23', '2026-10-24'] });
   // The cross-midnight topic belongs to the day and hour it started.
@@ -76,7 +79,7 @@ test('serves summaries by chat and date, original messages per topic, and the pa
     ],
   }] });
   assert.equal((await get(`/${OTHER}/20261024.json`)).status, 404);
-  for (const path of [`/${CHAT}`, `/${CHAT}/20261024`]) {
+  for (const path of ['/', `/${CHAT}`, `/${CHAT}/20261024`]) {
     const response = await get(path);
     assert.equal(response.status, 200);
     assert.match(await response.text(), /\/assets\/app\.js/);

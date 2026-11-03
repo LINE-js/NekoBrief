@@ -164,16 +164,51 @@ function renderDay(date, topics) {
   content.replaceChildren(...nodes);
 }
 
+/** Home: every served chat, each linking to its summary for today. */
+function renderHome({ today, chats }) {
+  const heading = element('section', 'day-heading');
+  heading.append(
+    element('h1', undefined, '聊天室'),
+    element('p', undefined, `今天是 ${monthDay(today)} 星期${weekday(today)}・點選聊天室查看今天的摘要`),
+  );
+  const list = element('nav', 'chat-list');
+  list.setAttribute('aria-label', '聊天室');
+  chats.forEach((item, index) => {
+    const link = element('a', `topic chat-link accent-${index % ACCENTS}`);
+    link.href = `/${item.chatId}/${compact(today)}`;
+    link.dataset.route = '';
+    link.style.setProperty('--delay', `${Math.min(index, 10) * 40}ms`);
+    const header = element('header');
+    header.append(
+      element('h3', undefined, item.name),
+      element('span', 'time-chip', item.todayTopics ? `今天 ${item.todayTopics} 個話題` : '今天尚無摘要'),
+    );
+    link.append(header);
+    list.append(link);
+  });
+  content.replaceChildren(heading, list);
+}
+
 async function route() {
   const current = ++generation;
   const [chatId, digits, ...rest] = location.pathname.split('/').filter(Boolean);
-  if (!chatId || rest.length > 0) {
+  if (rest.length > 0) {
     chat = undefined;
     datesNav.replaceChildren();
     content.replaceChildren(notice('🔎', '請使用 /{聊天室ID}/{年月日} 開啟摘要。'));
     return;
   }
   try {
+    if (!chatId) {
+      chat = undefined;
+      chatName.textContent = '';
+      datesNav.replaceChildren();
+      document.title = 'NekoBrief';
+      const home = await getJson('/api/chats');
+      if (current !== generation) return;
+      renderHome(home);
+      return;
+    }
     if (chat?.chatId !== chatId) {
       chatName.textContent = '';
       chat = undefined;
