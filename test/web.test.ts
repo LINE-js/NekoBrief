@@ -91,6 +91,13 @@ test('serves summaries by chat and date, original messages per topic, and the pa
   assert.match(preview, /<meta property="og:title" content="貓咪群 · 2026-10-24 · NekoBrief">/);
   assert.match(preview, /<meta property="og:description" content="貓咪群 在 2026-10-24 的 1 個話題：早餐">/);
   assert.match(preview, new RegExp(`<meta property="og:url" content="https://127\\.0\\.0\\.1:\\d+/${CHAT}/20261024">`));
+  assert.match(preview, new RegExp(`<meta property="og:image" content="https://127\\.0\\.0\\.1:\\d+/assets/og\\.png">`));
+  assert.match(preview, /<meta name="twitter:card" content="summary_large_image">/);
+  const image = await get('/assets/og.png');
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  const png = Buffer.from(await image.arrayBuffer());
+  // The declared og:image:width/height must match the file's IHDR.
+  assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [1200, 630]);
   const unknown = await (await get(`/${OTHER}/20261024`)).text();
   assert.match(unknown, /<meta property="og:title" content="NekoBrief">/);
   assert.ok(!unknown.includes('別處'));

@@ -8,23 +8,34 @@ const ASSETS: Record<string, { type: string; body: Buffer }> = {
   '/assets/app.js': { type: 'text/javascript; charset=utf-8', body: readFileSync(new URL('app.js', PUBLIC)) },
   '/assets/style.css': { type: 'text/css; charset=utf-8', body: readFileSync(new URL('style.css', PUBLIC)) },
   '/favicon.ico': { type: 'image/x-icon', body: readFileSync(new URL('favicon.ico', PUBLIC)) },
+  '/assets/og.png': { type: 'image/png', body: readFileSync(new URL('og.png', PUBLIC)) },
 };
 const INDEX = readFileSync(new URL('index.html', PUBLIC), 'utf8');
 const ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
 const escapeHtml = (text: string) => text.replace(/[&<>"]/g, char => ESCAPES[char]!);
 const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:]+\](?::\d{1,5})?$/;
 
-/** Link previews are built by crawlers that do not run the page's script, so the tags are written by the server. */
-function metaTags(title: string, description: string, url: string | undefined): string {
+/**
+ * Link previews are built by crawlers that do not run the page's script, so the tags are written by the server.
+ * `og:url` and `og:image` must be absolute, so both need the request's origin and are left out without one.
+ */
+function metaTags(title: string, description: string, origin: string | undefined, path: string): string {
   const tags = [
     ['og:type', 'website'], ['og:site_name', 'NekoBrief'], ['og:locale', 'zh_TW'],
     ['og:title', title], ['og:description', description],
   ];
-  if (url) tags.push(['og:url', url]);
+  if (origin) {
+    tags.push(
+      ['og:url', `${origin}${path}`],
+      ['og:image', `${origin}/assets/og.png`], ['og:image:type', 'image/png'],
+      ['og:image:width', '1200'], ['og:image:height', '630'],
+      ['og:image:alt', 'NekoBrief：聊天室的每小時話題摘要'],
+    );
+  }
   return [
     `<meta name="description" content="${escapeHtml(description)}">`,
     ...tags.map(([property, content]) => `<meta property="${property}" content="${escapeHtml(content!)}">`),
-    '<meta name="twitter:card" content="summary">',
+    `<meta name="twitter:card" content="${origin ? 'summary_large_image' : 'summary'}">`,
   ].join('\n  ');
 }
 
@@ -168,7 +179,7 @@ export function createWebServer({ chats, log, timezone, now = Date.now }: {
           ? `${name} 在 ${date} 沒有摘要。`
           : `${name} 在 ${date} 的 ${topics.length} 個話題：${topics.slice(0, 5).map(topic => topic.title).join('、')}${topics.length > 5 ? '…' : ''}`;
       }
-      const meta = metaTags(title, description, origin && `${origin}${path}`);
+      const meta = metaTags(title, description, origin, path);
       reply(response, 200, 'text/html; charset=utf-8', INDEX.replace('<!--meta-->', () => meta), head);
       return;
     }
